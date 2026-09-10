@@ -30,7 +30,8 @@ public class ESP32Simulator : M2MqttUnityClient
     private string TopicStatus => topicBase + "/status";
     private string TopicTelemetry => topicBase + "/telemetry";
 
-    // ── Unity ─────────────────────────────────────────────────────────────────
+    private long _clockOffset = 0;
+    private bool _isClockSynced = false;
 
     protected override void Start()
     {
@@ -52,8 +53,6 @@ public class ESP32Simulator : M2MqttUnityClient
         }
     }
 
-    // ── Callbacks M2MqttUnityClient ───────────────────────────────────────────
-
     protected override void SubscribeTopics()
     {
         client.Subscribe(
@@ -74,15 +73,40 @@ public class ESP32Simulator : M2MqttUnityClient
         if (topic != TopicCmd) return;
 
         string json = System.Text.Encoding.UTF8.GetString(message);
-        Debug.Log("[ESP32Sim] Comando recebido: " + json);
 
         if (json.Contains("\"power\""))
             SetPower(json.Contains("\"on\""));
         else if (json.Contains("\"brightness\""))
             SetBrightness(ParseInt(json, "value"));
+
+        long sentAt = ParseLong(json, "sentAt");
+        if (sentAt <= 0) return;
+
+        long currentMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        if (!_isClockSynced)
+        {
+            _clockOffset = currentMs - sentAt;
+            _isClockSynced = true;
+            Debug.Log($"<color=yellow>[SISTEMA]</color> Relógios calibrados com sucesso! Desvio base: {_clockOffset} ms");
+            return;
+        }
+
+        long realLatencyMs = (currentMs - _clockOffset) - sentAt;
+
+        Debug.Log($"<color=green>[LATÊNCIA APP -> UNITY]</color> Tempo de resposta visual: {realLatencyMs} ms");
     }
 
-    // ── Controle ──────────────────────────────────────────────────────────────
+    long ParseLong(string json, string key)
+    {
+        string search = "\"" + key + "\":";
+        int idx = json.IndexOf(search);
+        if (idx < 0) return 0;
+        int start = idx + search.Length;
+        int end = start;
+        while (end < json.Length && char.IsDigit(json[end])) end++;
+        return long.TryParse(json.Substring(start, end - start), out long r) ? r : 0;
+    }
 
     void SetPower(bool on)
     {
@@ -110,8 +134,6 @@ public class ESP32Simulator : M2MqttUnityClient
         }
     }
 
-    // ── Publicações ───────────────────────────────────────────────────────────
-
     void PublishStatus()
     {
         if (client == null || !client.IsConnected) return;
@@ -135,8 +157,6 @@ public class ESP32Simulator : M2MqttUnityClient
             MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE, false);
     }
 
-    // ── Temperatura simulada ──────────────────────────────────────────────────
-
     void SimulateTemperature()
     {
         if (_isOn)
@@ -150,8 +170,6 @@ public class ESP32Simulator : M2MqttUnityClient
             _temp = Mathf.Max(_temp, ambientTemperature);
         }
     }
-
-    // ── HUD debug ─────────────────────────────────────────────────────────────
 
     void OnGUI()
     {
@@ -168,8 +186,6 @@ public class ESP32Simulator : M2MqttUnityClient
         GUI.color = _isOn ? new Color(1f, 0.7f, 0.1f) : Color.gray;
         GUI.Label(new Rect(10, 10, 260, 110), text);
     }
-
-    // ── Parse JSON simples ────────────────────────────────────────────────────
 
     int ParseInt(string json, string key)
     {
