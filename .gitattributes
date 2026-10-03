@@ -1,0 +1,3 @@
+# Ignora bibliotecas de terceiros nas estatísticas de linguagem
+Assets/M2MqttUnity/** linguist-vendored
+Assets/M2Mqtt/** linguist-vendored
